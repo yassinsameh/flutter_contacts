@@ -185,18 +185,22 @@ class Contact {
             .toList(),
         addresses: ((json['addresses'] as List?) ?? [])
             .map((x) => Address.fromJson(Map<String, dynamic>.from(x)))
+            .toSet()
             .toList(),
         organizations: ((json['organizations'] as List?) ?? [])
             .map((x) => Organization.fromJson(Map<String, dynamic>.from(x)))
             .toList(),
         websites: ((json['websites'] as List?) ?? [])
             .map((x) => Website.fromJson(Map<String, dynamic>.from(x)))
+            .toSet()
             .toList(),
         socialMedias: ((json['socialMedias'] as List?) ?? [])
             .map((x) => SocialMedia.fromJson(Map<String, dynamic>.from(x)))
+            .toSet()
             .toList(),
         events: ((json['events'] as List?) ?? [])
             .map((x) => Event.fromJson(Map<String, dynamic>.from(x)))
+            .toSet()
             .toList(),
         notes: ((json['notes'] as List?) ?? [])
             .map((x) => Note.fromJson(Map<String, dynamic>.from(x)))
@@ -222,11 +226,11 @@ class Contact {
         'name': name.toJson(),
         'phones': phones.map((x) => x.toJson()).toList(),
         'emails': emails.map((x) => x.toJson()).toList(),
-        'addresses': addresses.map((x) => x.toJson()).toList(),
-        'organizations': organizations.map((x) => x.toJson()).toList(),
-        'websites': websites.map((x) => x.toJson()).toList(),
-        'socialMedias': socialMedias.map((x) => x.toJson()).toList(),
-        'events': events.map((x) => x.toJson()).toList(),
+        'addresses': addresses.map((x) => x.toJson()).toSet().toList(),
+        'organizations': organizations.map((x) => x.toJson()).toSet().toList(),
+        'websites': websites.map((x) => x.toJson()).toSet().toList(),
+        'socialMedias': socialMedias.map((x) => x.toJson()).toSet().toList(),
+        'events': events.map((x) => x.toJson()).toSet().toList(),
         'notes': notes.map((x) => x.toJson()).toList(),
         'accounts': accounts.map((x) => x.toJson()).toList(),
         'groups': groups.map((x) => x.toJson()).toList(),
