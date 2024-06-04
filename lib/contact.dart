@@ -264,8 +264,7 @@ class Contact {
     return Contact(
       id: id ?? this.id,
       displayName: displayName ?? this.displayName,
-      thumbnail:
-          thumbnail == undefined ? this.thumbnail : thumbnail as Uint8List?,
+      thumbnail: thumbnail == undefined ? this.thumbnail : thumbnail as Uint8List?,
       photo: photo == undefined ? this.photo : photo as Uint8List?,
       isStarred: isStarred ?? this.isStarred,
       name: name ?? this.name,
@@ -302,6 +301,7 @@ class Contact {
       _listHashCode(socialMedias) ^
       _listHashCode(events) ^
       _listHashCode(notes) ^
+      _listHashCode(accounts) ^
       thumbnailFetched.hashCode ^
       photoFetched.hashCode ^
       isUnified.hashCode ^
@@ -330,8 +330,7 @@ class Contact {
       o.propertiesFetched == propertiesFetched;
 
   @override
-  String toString() =>
-      'Contact(id=$id, displayName=$displayName, thumbnail=$thumbnail, '
+  String toString() => 'Contact(id=$id, displayName=$displayName, thumbnail=$thumbnail, '
       'photo=$photo, isStarred=$isStarred, name=$name, phones=$phones, '
       'emails=$emails, addresses=$addresses, organizations=$organizations, '
       'websites=$websites, socialMedias=$socialMedias, events=$events, '
@@ -394,8 +393,7 @@ class Contact {
     }
     if (withPhoto && photoOrThumbnail != null) {
       final encoding = vCardEncode(base64.encode(photoOrThumbnail!));
-      final prefix =
-          v4 ? 'PHOTO:data:image/jpeg;base64,' : 'PHOTO;ENCODING=b;TYPE=JPEG:';
+      final prefix = v4 ? 'PHOTO:data:image/jpeg;base64,' : 'PHOTO;ENCODING=b;TYPE=JPEG:';
       lines.add(prefix + encoding);
     }
     lines.addAll([
@@ -427,9 +425,7 @@ class Contact {
   Contact deduplicateProperties() {
     return copyWith(
       phones: _depuplicateProperty(
-          phones,
-          (x) => (x.normalizedNumber.isNotEmpty ? x.normalizedNumber : x.number)
-              .hashCode),
+          phones, (x) => (x.normalizedNumber.isNotEmpty ? x.normalizedNumber : x.number).hashCode),
       emails: _depuplicateProperty(emails, (x) => x.address.hashCode),
       addresses: _depuplicateProperty(addresses),
       organizations: _depuplicateProperty(organizations),
@@ -440,8 +436,7 @@ class Contact {
     );
   }
 
-  static List<T> _depuplicateProperty<T>(List<T> list,
-      [int Function(T)? hashFn]) {
+  static List<T> _depuplicateProperty<T>(List<T> list, [int Function(T)? hashFn]) {
     hashFn ??= (T x) => x.hashCode;
     var deduplicated = <T>[];
     var seen = Set<int>();
@@ -455,11 +450,9 @@ class Contact {
     return deduplicated;
   }
 
-  int _listHashCode(List<dynamic> elements) => elements.isEmpty
-      ? 0
-      : elements.map((x) => x.hashCode).reduce((x, y) => x ^ y);
+  int _listHashCode(List<dynamic> elements) =>
+      elements.isEmpty ? 0 : elements.map((x) => x.hashCode).reduce((x, y) => x ^ y);
 
   bool _listEqual(List<dynamic> aa, List<dynamic> bb) =>
-      aa.length == bb.length &&
-      Iterable.generate(aa.length, (i) => i).every((i) => aa[i] == bb[i]);
+      aa.length == bb.length && Iterable.generate(aa.length, (i) => i).every((i) => aa[i] == bb[i]);
 }

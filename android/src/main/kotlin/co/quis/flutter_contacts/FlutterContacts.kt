@@ -27,6 +27,7 @@ import android.provider.ContactsContract.Contacts
 import android.provider.ContactsContract.Data
 import android.provider.ContactsContract.Groups
 import android.provider.ContactsContract.RawContacts
+import android.util.Log
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.OutputStream
@@ -432,12 +433,15 @@ class FlutterContacts {
                         .build()
                 )
             } else {
-                ops.add(
-                    ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
-                        .withValue(RawContacts.ACCOUNT_TYPE, contact.accounts.first().type)
-                        .withValue(RawContacts.ACCOUNT_NAME, contact.accounts.first().name)
-                        .build()
-                )
+                // Iterate over all accounts and add them
+                for (account in contact.accounts) {
+                    ops.add(
+                        ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+                            .withValue(RawContacts.ACCOUNT_TYPE, account.type)
+                            .withValue(RawContacts.ACCOUNT_NAME, account.name)
+                            .build()
+                    )
+                }
             }
 
             // Build all properties.
