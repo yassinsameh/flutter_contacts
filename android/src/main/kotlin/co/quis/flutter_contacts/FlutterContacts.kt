@@ -1162,12 +1162,26 @@ class FlutterContacts {
                 ContentUris.withAppendedId(RawContacts.CONTENT_URI, rawContactId),
                 RawContacts.DisplayPhoto.CONTENT_DIRECTORY
             )
-            var fd: AssetFileDescriptor? = resolver.openAssetFileDescriptor(photoUri, "rw")
-            if (fd != null) {
-                val os: OutputStream = fd.createOutputStream()
-                os.write(photo)
-                os.close()
-                fd.close()
+            var fd: AssetFileDescriptor? = null
+
+            try {
+                fd = resolver.openAssetFileDescriptor(photoUri, "rw")
+                if (fd != null) {
+                    FileOutputStream(fd.fileDescriptor).use { fos ->
+                        fos.write(photo)
+                        fos.flush() // Ensure all data is written
+                    }
+                } else {
+                    Log.e(IMAGE_HANDLING_ERROR, "Failed to open AssetFileDescriptor for photoUri: $photoUri")
+                }
+            } catch (e: IOException) {
+                Log.e(TAG, "Error writing photo", e)
+            } finally {
+                try {
+                    fd?.close()
+                } catch (e: IOException) {
+                    Log.e(IMAGE_HANDLING_ERROR, "Error closing AssetFileDescriptor", e)
+                }
             }
         }
     }
