@@ -31,6 +31,7 @@ import android.util.Log
 import java.io.FileNotFoundException
 import java.io.InputStream
 import java.io.OutputStream
+import java.io.IOException
 import co.quis.flutter_contacts.properties.Account as PAccount
 import co.quis.flutter_contacts.properties.Address as PAddress
 import co.quis.flutter_contacts.properties.Email as PEmail
@@ -1167,20 +1168,20 @@ class FlutterContacts {
             try {
                 fd = resolver.openAssetFileDescriptor(photoUri, "rw")
                 if (fd != null) {
-                    FileOutputStream(fd.fileDescriptor).use { fos ->
-                        fos.write(photo)
-                        fos.flush() // Ensure all data is written
+                    val os: OutputStream = fd.createOutputStream()
+                    os.use { it ->
+                        it.write(photo)
                     }
                 } else {
-                    Log.e(IMAGE_HANDLING_ERROR, "Failed to open AssetFileDescriptor for photoUri: $photoUri")
+                    Log.e("IMAGE_HANDLING_ERROR", "Failed to open AssetFileDescriptor for photoUri: $photoUri")
                 }
             } catch (e: IOException) {
-                Log.e(TAG, "Error writing photo", e)
+                Log.e("IMAGE_HANDLING_ERROR", "Error writing photo", e)
             } finally {
                 try {
                     fd?.close()
                 } catch (e: IOException) {
-                    Log.e(IMAGE_HANDLING_ERROR, "Error closing AssetFileDescriptor", e)
+                    Log.e("IMAGE_HANDLING_ERROR", "Error closing AssetFileDescriptor", e)
                 }
             }
         }
