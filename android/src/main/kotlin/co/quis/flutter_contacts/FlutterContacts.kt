@@ -433,15 +433,12 @@ class FlutterContacts {
                         .build()
                 )
             } else {
-                // Iterate over all accounts and add them
-                for (account in contact.accounts) {
-                    ops.add(
-                        ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
-                            .withValue(RawContacts.ACCOUNT_TYPE, account.type)
-                            .withValue(RawContacts.ACCOUNT_NAME, account.name)
-                            .build()
-                    )
-                }
+                ops.add(
+                    ContentProviderOperation.newInsert(RawContacts.CONTENT_URI)
+                        .withValue(RawContacts.ACCOUNT_TYPE, contact.accounts.first().type)
+                        .withValue(RawContacts.ACCOUNT_NAME, contact.accounts.first().name)
+                        .build()
+                )
             }
 
             // Build all properties.
