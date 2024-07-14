@@ -301,7 +301,8 @@ class Contact {
       _listHashCode(socialMedias) ^
       _listHashCode(events) ^
       _listHashCode(notes) ^
-      _listHashCode(accounts) ^
+      //Accounts hashcode not working, do not include
+      // _listHashCode(accounts) ^
       thumbnailFetched.hashCode ^
       photoFetched.hashCode ^
       isUnified.hashCode ^
