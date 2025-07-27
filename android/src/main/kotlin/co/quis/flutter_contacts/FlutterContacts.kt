@@ -471,10 +471,18 @@ class FlutterContacts {
             // Build all properties.
             buildOpsForContact(contact, ops)
 
-            // Save.
-            val addContactResults =
-                resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(ops))
-            val rawId: Long = ContentUris.parseId(addContactResults[0].uri!!)
+            // Apply operations in batches of 500 to avoid the "Too many content provider operations" error
+            val batchSize = 500
+            var rawId: Long = 0
+            for (i in ops.indices step batchSize) {
+                val endIndex = minOf(i + batchSize, ops.size)
+                val batch = ops.subList(i, endIndex)
+                val batchResults = resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(batch))
+                // Only get the raw ID from the first batch (which contains the RawContacts insert)
+                if (i == 0 && batchResults.isNotEmpty() && batchResults[0].uri != null) {
+                    rawId = ContentUris.parseId(batchResults[0].uri!!)
+                }
+            }
 
             // Add photo if provided (needs to be after saving the contact so we know
             // its raw contact ID).
@@ -581,8 +589,13 @@ class FlutterContacts {
                 buildOpsForPhoto(resolver, contact.photo!!, ops, rawContactId.toLong())
             }
 
-            // Save.
-            resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(ops))
+            // Apply operations in batches of 500 to avoid the "Too many content provider operations" error
+            val batchSize = 500
+            for (i in ops.indices step batchSize) {
+                val endIndex = minOf(i + batchSize, ops.size)
+                val batch = ops.subList(i, endIndex)
+                resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(batch))
+            }
 
             // Update starred status.
             val contentValues = ContentValues()
@@ -626,7 +639,13 @@ class FlutterContacts {
                 )
             }
 
-            resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(ops))
+            // Apply operations in batches of 500 to avoid the "Too many content provider operations" error
+            val batchSize = 500
+            for (i in ops.indices step batchSize) {
+                val endIndex = minOf(i + batchSize, ops.size)
+                val batch = ops.subList(i, endIndex)
+                resolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(batch))
+            }
         }
 
         fun getGroups(resolver: ContentResolver): List<Map<String, Any>> {
