@@ -175,31 +175,38 @@ class FlutterContactsPlugin : FlutterPlugin, MethodCallHandler, EventChannel.Str
             // Selects fields for request contact, or for all contacts.
             "select" ->
                 coroutineScope.launch(Dispatchers.IO) { // runs in a background thread
-                    val args = call.arguments as List<Any>
-                    val id = args[0] as String?
-                    val withProperties = args[1] as Boolean
-                    val withThumbnail = args[2] as Boolean
-                    val withPhoto = args[3] as Boolean
-                    val withGroups = args[4] as Boolean
-                    val withAccounts = args[5] as Boolean
-                    val returnUnifiedContacts = args[6] as Boolean
-                    val includeNonVisible = args[7] as Boolean
-                    // args[8] = includeNotesOnIos13AndAbove
-                    val contacts: List<Map<String, Any?>> =
-                        FlutterContacts.select(
-                            resolver!!,
-                            id,
-                            withProperties,
-                            // Sometimes thumbnail is available but photo is not, so we
-                            // fetch thumbnails even if only the photo was requested.
-                            withThumbnail || withPhoto,
-                            withPhoto,
-                            withGroups,
-                            withAccounts,
-                            returnUnifiedContacts,
-                            includeNonVisible
-                        )
-                    coroutineScope.launch(Dispatchers.Main) { result.success(contacts) }
+                    try {
+                        val args = call.arguments as List<Any>
+                        val id = args[0] as String?
+                        val withProperties = args[1] as Boolean
+                        val withThumbnail = args[2] as Boolean
+                        val withPhoto = args[3] as Boolean
+                        val withGroups = args[4] as Boolean
+                        val withAccounts = args[5] as Boolean
+                        val returnUnifiedContacts = args[6] as Boolean
+                        val includeNonVisible = args[7] as Boolean
+                        // args[8] = includeNotesOnIos13AndAbove
+                        val contacts: List<Map<String, Any?>> =
+                            FlutterContacts.select(
+                                resolver!!,
+                                id,
+                                withProperties,
+                                // Sometimes thumbnail is available but photo is not, so we
+                                // fetch thumbnails even if only the photo was requested.
+                                withThumbnail || withPhoto,
+                                withPhoto,
+                                withGroups,
+                                withAccounts,
+                                returnUnifiedContacts,
+                                includeNonVisible
+                            )
+                        coroutineScope.launch(Dispatchers.Main) { result.success(contacts) }
+                    } catch (e: Exception) {
+                        android.util.Log.e("FlutterContacts", "Error in select method: ${e.message}", e)
+                        coroutineScope.launch(Dispatchers.Main) { 
+                            result.error("CONTACTS_ERROR", "Failed to read contacts: ${e.message}", e.stackTraceToString())
+                        }
+                    }
                 }
             // Inserts a new contact and return it.
             "insert" ->

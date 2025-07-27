@@ -215,219 +215,309 @@ class FlutterContacts {
             // Maps contact ID to its index in `contacts`.
             var index = mutableMapOf<String, Int>()
 
-            fun getString(col: String): String = cursor.getString(cursor.getColumnIndex(col)) ?: ""
-            fun getInt(col: String): Int = cursor.getInt(cursor.getColumnIndex(col)) ?: 0
+            fun getString(col: String): String {
+                return try {
+                    if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                        val columnIndex = cursor.getColumnIndex(col)
+                        if (columnIndex >= 0) {
+                            cursor.getString(columnIndex) ?: ""
+                        } else {
+                            ""
+                        }
+                    } else {
+                        ""
+                    }
+                } catch (e: Exception) {
+                    ""
+                }
+            }
+            
+            fun getInt(col: String): Int {
+                return try {
+                    if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                        val columnIndex = cursor.getColumnIndex(col)
+                        if (columnIndex >= 0) {
+                            cursor.getInt(columnIndex)
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    }
+                } catch (e: Exception) {
+                    0
+                }
+            }
+            
             fun getBool(col: String): Boolean = getInt(col) == 1
 
-            while (cursor.moveToNext()) {
-                // ID and display name.
-                val id = if (returnUnifiedContacts) getString(Data.CONTACT_ID) else getString(Data.RAW_CONTACT_ID)
-                if (id !in index) {
-                    var contact = Contact(
-                        /*id=*/id,
-                        /*displayName=*/getString(Contacts.DISPLAY_NAME_PRIMARY),
-                        isStarred = getBool(Contacts.STARRED)
-                    )
+            try {
+                while (cursor.moveToNext()) {
+                    // ID and display name.
+                    val id = if (returnUnifiedContacts) getString(Data.CONTACT_ID) else getString(Data.RAW_CONTACT_ID)
+                    if (id !in index) {
+                        var contact = Contact(
+                            /*id=*/id,
+                            /*displayName=*/getString(Contacts.DISPLAY_NAME_PRIMARY),
+                            isStarred = getBool(Contacts.STARRED)
+                        )
 
-                    // Fetch high-resolution photo if requested.
-                    if (withPhoto) {
-                        val contactUri: Uri =
-                            ContentUris.withAppendedId(Contacts.CONTENT_URI, id.toLong())
-                        val displayPhotoUri: Uri =
-                            Uri.withAppendedPath(contactUri, Contacts.Photo.DISPLAY_PHOTO)
+                        // Fetch high-resolution photo if requested.
+                        if (withPhoto) {
+                            val contactUri: Uri =
+                                ContentUris.withAppendedId(Contacts.CONTENT_URI, id.toLong())
+                            val displayPhotoUri: Uri =
+                                Uri.withAppendedPath(contactUri, Contacts.Photo.DISPLAY_PHOTO)
+                            try {
+                                var fis: InputStream? = resolver.openInputStream(displayPhotoUri)
+                                contact.photo = fis?.readBytes()
+                            } catch (e: FileNotFoundException) {
+                                // This happens when no high-resolution photo exists, and is
+                                // a common situation.
+                            }
+                        }
+
+                        index[id] = contacts.size
+                        contacts.add(contact)
+                    }
+                    var contact: Contact = contacts[index[id]!!]
+
+                    // The MIME type of the data in current row (e.g. phone, email, etc).
+                    val mimetype = getString(Data.MIMETYPE)
+
+                    // Thumbnails.
+                    if (withThumbnail && mimetype == Photo.CONTENT_ITEM_TYPE) {
                         try {
-                            var fis: InputStream? = resolver.openInputStream(displayPhotoUri)
-                            contact.photo = fis?.readBytes()
-                        } catch (e: FileNotFoundException) {
-                            // This happens when no high-resolution photo exists, and is
-                            // a common situation.
+                            if (!cursor.isClosed) {
+                                val columnIndex = cursor.getColumnIndex(Photo.PHOTO)
+                                if (columnIndex >= 0) {
+                                    contact.thumbnail = cursor.getBlob(columnIndex)
+                                }
+                            }
+                        } catch (e: Exception) {
+                            // Ignore thumbnail errors
                         }
                     }
 
-                    index[id] = contacts.size
-                    contacts.add(contact)
-                }
-                var contact: Contact = contacts[index[id]!!]
-
-                // The MIME type of the data in current row (e.g. phone, email, etc).
-                val mimetype = getString(Data.MIMETYPE)
-
-                // Thumbnails.
-                if (withThumbnail && mimetype == Photo.CONTENT_ITEM_TYPE) {
-                    contact.thumbnail = cursor.getBlob(cursor.getColumnIndex(Photo.PHOTO))
-                }
-
-                // All properties (phones, emails, etc).
-                if (withProperties) {
-                    if (withAccounts) {
-                        // Raw IDs are IDs of the contact in different accounts (e.g. the
-                        // same contact might have Google, WhatsApp and Skype accounts, each
-                        // with its own raw ID).
-                        val rawId = getString(Data.RAW_CONTACT_ID)
-                        val accountType = getString(RawContacts.ACCOUNT_TYPE)
-                        val accountName = getString(RawContacts.ACCOUNT_NAME)
-                        var accountSeen = false
-                        for (account in contact.accounts) {
-                            if (account.rawId == rawId) {
-                                accountSeen = true
-                                account.mimetypes =
-                                    (account.mimetypes + mimetype).toSortedSet().toList()
+                    // All properties (phones, emails, etc).
+                    if (withProperties) {
+                        if (withAccounts) {
+                            // Raw IDs are IDs of the contact in different accounts (e.g. the
+                            // same contact might have Google, WhatsApp and Skype accounts, each
+                            // with its own raw ID).
+                            val rawId = getString(Data.RAW_CONTACT_ID)
+                            val accountType = getString(RawContacts.ACCOUNT_TYPE)
+                            val accountName = getString(RawContacts.ACCOUNT_NAME)
+                            var accountSeen = false
+                            for (account in contact.accounts) {
+                                if (account.rawId == rawId) {
+                                    accountSeen = true
+                                    account.mimetypes =
+                                        (account.mimetypes + mimetype).toSortedSet().toList()
+                                }
                             }
-                        }
-                        if (!accountSeen) {
-                            val account = PAccount(
-                                rawId,
-                                accountType,
-                                accountName,
-                                listOf(mimetype)
-                            )
-                            contact.accounts += account
-                        }
-                    }
-
-                    when (mimetype) {
-                        StructuredName.CONTENT_ITEM_TYPE -> {
-                            // Save nickname in case it was there already.
-                            val nickname: String = contact.name.nickname
-                            contact.name = PName(
-                                getString(StructuredName.GIVEN_NAME),
-                                getString(StructuredName.FAMILY_NAME),
-                                getString(StructuredName.MIDDLE_NAME),
-                                getString(StructuredName.PREFIX),
-                                getString(StructuredName.SUFFIX),
-                                nickname,
-                                getString(StructuredName.PHONETIC_GIVEN_NAME),
-                                getString(StructuredName.PHONETIC_FAMILY_NAME),
-                                getString(StructuredName.PHONETIC_MIDDLE_NAME)
-                            )
-                        }
-                        Nickname.CONTENT_ITEM_TYPE ->
-                            contact.name.nickname = getString(Nickname.NAME)
-                        Phone.CONTENT_ITEM_TYPE -> {
-                            val label: String = getPhoneLabel(cursor)
-                            val customLabel: String =
-                                if (label == "custom") getPhoneCustomLabel(cursor) else ""
-                            val phone = PPhone(
-                                getString(Phone.NUMBER),
-                                getString(Phone.NORMALIZED_NUMBER),
-                                label,
-                                customLabel,
-                                getInt(Phone.IS_PRIMARY) == 1
-                            )
-                            contact.phones += phone
-                        }
-                        Email.CONTENT_ITEM_TYPE -> {
-                            val label: String = getEmailLabel(cursor)
-                            val customLabel: String =
-                                if (label == "custom") getEmailCustomLabel(cursor) else ""
-                            val email = PEmail(
-                                getString(Email.ADDRESS),
-                                label,
-                                customLabel,
-                                getInt(Email.IS_PRIMARY) == 1
-                            )
-                            contact.emails += email
-                        }
-                        StructuredPostal.CONTENT_ITEM_TYPE -> {
-                            val label: String = getAddressLabel(cursor)
-                            val customLabel: String =
-                                if (label == "custom") getAddressCustomLabel(cursor) else ""
-                            val address = PAddress(
-                                getString(StructuredPostal.FORMATTED_ADDRESS),
-                                label,
-                                customLabel,
-                                getString(StructuredPostal.STREET),
-                                getString(StructuredPostal.POBOX),
-                                getString(StructuredPostal.NEIGHBORHOOD),
-                                getString(StructuredPostal.CITY),
-                                getString(StructuredPostal.REGION),
-                                getString(StructuredPostal.POSTCODE),
-                                getString(StructuredPostal.COUNTRY),
-                                "",
-                                "",
-                                ""
-                            )
-                            contact.addresses += address
-                        }
-                        Organization.CONTENT_ITEM_TYPE -> {
-                            val organization = POrganization(
-                                getString(Organization.COMPANY),
-                                getString(Organization.TITLE),
-                                getString(Organization.DEPARTMENT),
-                                getString(Organization.JOB_DESCRIPTION),
-                                getString(Organization.SYMBOL),
-                                getString(Organization.PHONETIC_NAME),
-                                getString(Organization.OFFICE_LOCATION)
-                            )
-                            contact.organizations += organization
-                        }
-                        Website.CONTENT_ITEM_TYPE -> {
-                            val label: String = getWebsiteLabel(cursor)
-                            val customLabel: String =
-                                if (label == "custom") getWebsiteCustomLabel(cursor) else ""
-                            val website = PWebsite(
-                                getString(Website.URL),
-                                label,
-                                customLabel
-                            )
-                            contact.websites += website
-                        }
-                        Im.CONTENT_ITEM_TYPE -> {
-                            val label: String = getSocialMediaLabel(cursor)
-                            val customLabel: String =
-                                if (label == "custom") getSocialMediaCustomLabel(cursor) else ""
-                            val socialMedia = PSocialMedia(
-                                getString(Im.DATA),
-                                label,
-                                customLabel
-                            )
-                            contact.socialMedias += socialMedia
-                        }
-                        Event.CONTENT_ITEM_TYPE -> {
-                            val date = getString(Event.START_DATE)
-                            var year: Int? = null
-                            var month: Int? = null
-                            var day: Int? = null
-                            if (YYYY_MM_DD matches date) {
-                                year = date.substring(0, 4).toInt()
-                                month = date.substring(5, 7).toInt()
-                                day = date.substring(8, 10).toInt()
-                            } else if (MM_DD matches date) {
-                                month = date.substring(2, 4).toInt()
-                                day = date.substring(5, 7).toInt()
-                            }
-                            if (month != null && day != null) {
-                                val label: String = getEventLabel(cursor)
-                                val customLabel: String =
-                                    if (label == "custom") getEventCustomLabel(cursor) else ""
-                                val event = PEvent(
-                                    year,
-                                    month!!,
-                                    day!!,
-                                    label,
-                                    customLabel
+                            if (!accountSeen) {
+                                val account = PAccount(
+                                    rawId,
+                                    accountType,
+                                    accountName,
+                                    listOf(mimetype)
                                 )
-                                contact.events += event
+                                contact.accounts += account
                             }
                         }
-                        Note.CONTENT_ITEM_TYPE -> {
-                            val note: String = getString(Note.NOTE)
-                            // It seems that every contact has an empty note by default;
-                            // filter empty notes to avoid confusion.
-                            if (!note.isEmpty()) {
-                                val note = PNote(getString(Note.NOTE))
-                                contact.notes += note
+
+                        when (mimetype) {
+                            StructuredName.CONTENT_ITEM_TYPE -> {
+                                // Save nickname in case it was there already.
+                                val nickname: String = contact.name.nickname
+                                contact.name = PName(
+                                    getString(StructuredName.GIVEN_NAME),
+                                    getString(StructuredName.FAMILY_NAME),
+                                    getString(StructuredName.MIDDLE_NAME),
+                                    getString(StructuredName.PREFIX),
+                                    getString(StructuredName.SUFFIX),
+                                    nickname,
+                                    getString(StructuredName.PHONETIC_GIVEN_NAME),
+                                    getString(StructuredName.PHONETIC_FAMILY_NAME),
+                                    getString(StructuredName.PHONETIC_MIDDLE_NAME)
+                                )
                             }
-                        }
-                        GroupMembership.CONTENT_ITEM_TYPE -> {
-                            if (withGroups) {
-                                val groupId: String = getString(GroupMembership.GROUP_ROW_ID)
-                                if (groups.containsKey(groupId)) {
-                                    contact.groups += groups[groupId]!!
+                            Nickname.CONTENT_ITEM_TYPE ->
+                                contact.name.nickname = getString(Nickname.NAME)
+                            Phone.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val label: String = getPhoneLabel(cursor)
+                                    val customLabel: String =
+                                        if (label == "custom") getPhoneCustomLabel(cursor) else ""
+                                    val phone = PPhone(
+                                        getString(Phone.NUMBER),
+                                        getString(Phone.NORMALIZED_NUMBER),
+                                        label,
+                                        customLabel,
+                                        getInt(Phone.IS_PRIMARY) == 1
+                                    )
+                                    contact.phones += phone
+                                } catch (e: Exception) {
+                                    // Skip this phone entry if there's an error
+                                }
+                            }
+                            Email.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val label: String = getEmailLabel(cursor)
+                                    val customLabel: String =
+                                        if (label == "custom") getEmailCustomLabel(cursor) else ""
+                                    val email = PEmail(
+                                        getString(Email.ADDRESS),
+                                        label,
+                                        customLabel,
+                                        getInt(Email.IS_PRIMARY) == 1
+                                    )
+                                    contact.emails += email
+                                } catch (e: Exception) {
+                                    // Skip this email entry if there's an error
+                                }
+                            }
+                            StructuredPostal.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val label: String = getAddressLabel(cursor)
+                                    val customLabel: String =
+                                        if (label == "custom") getAddressCustomLabel(cursor) else ""
+                                    val address = PAddress(
+                                        getString(StructuredPostal.FORMATTED_ADDRESS),
+                                        label,
+                                        customLabel,
+                                        getString(StructuredPostal.STREET),
+                                        getString(StructuredPostal.POBOX),
+                                        getString(StructuredPostal.NEIGHBORHOOD),
+                                        getString(StructuredPostal.CITY),
+                                        getString(StructuredPostal.REGION),
+                                        getString(StructuredPostal.POSTCODE),
+                                        getString(StructuredPostal.COUNTRY),
+                                        "",
+                                        "",
+                                        ""
+                                    )
+                                    contact.addresses += address
+                                } catch (e: Exception) {
+                                    // Skip this address entry if there's an error
+                                }
+                            }
+                            Organization.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val organization = POrganization(
+                                        getString(Organization.COMPANY),
+                                        getString(Organization.TITLE),
+                                        getString(Organization.DEPARTMENT),
+                                        getString(Organization.JOB_DESCRIPTION),
+                                        getString(Organization.SYMBOL),
+                                        getString(Organization.PHONETIC_NAME),
+                                        getString(Organization.OFFICE_LOCATION)
+                                    )
+                                    contact.organizations += organization
+                                } catch (e: Exception) {
+                                    // Skip this organization entry if there's an error
+                                }
+                            }
+                            Website.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val label: String = getWebsiteLabel(cursor)
+                                    val customLabel: String =
+                                        if (label == "custom") getWebsiteCustomLabel(cursor) else ""
+                                    val website = PWebsite(
+                                        getString(Website.URL),
+                                        label,
+                                        customLabel
+                                    )
+                                    contact.websites += website
+                                } catch (e: Exception) {
+                                    // Skip this website entry if there's an error
+                                }
+                            }
+                            Im.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val label: String = getSocialMediaLabel(cursor)
+                                    val customLabel: String =
+                                        if (label == "custom") getSocialMediaCustomLabel(cursor) else ""
+                                    val socialMedia = PSocialMedia(
+                                        getString(Im.DATA),
+                                        label,
+                                        customLabel
+                                    )
+                                    contact.socialMedias += socialMedia
+                                } catch (e: Exception) {
+                                    // Skip this social media entry if there's an error
+                                }
+                            }
+                            Event.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val date = getString(Event.START_DATE)
+                                    var year: Int? = null
+                                    var month: Int? = null
+                                    var day: Int? = null
+                                    if (YYYY_MM_DD matches date) {
+                                        year = date.substring(0, 4).toInt()
+                                        month = date.substring(5, 7).toInt()
+                                        day = date.substring(8, 10).toInt()
+                                    } else if (MM_DD matches date) {
+                                        month = date.substring(2, 4).toInt()
+                                        day = date.substring(5, 7).toInt()
+                                    }
+                                    if (month != null && day != null) {
+                                        val label: String = getEventLabel(cursor)
+                                        val customLabel: String =
+                                            if (label == "custom") getEventCustomLabel(cursor) else ""
+                                        val event = PEvent(
+                                            year,
+                                            month!!,
+                                            day!!,
+                                            label,
+                                            customLabel
+                                        )
+                                        contact.events += event
+                                    }
+                                } catch (e: Exception) {
+                                    // Skip this event entry if there's an error
+                                }
+                            }
+                            Note.CONTENT_ITEM_TYPE -> {
+                                try {
+                                    val note: String = getString(Note.NOTE)
+                                    // It seems that every contact has an empty note by default;
+                                    // filter empty notes to avoid confusion.
+                                    if (!note.isEmpty()) {
+                                        val note = PNote(getString(Note.NOTE))
+                                        contact.notes += note
+                                    }
+                                } catch (e: Exception) {
+                                    // Skip this note entry if there's an error
+                                }
+                            }
+                            GroupMembership.CONTENT_ITEM_TYPE -> {
+                                if (withGroups) {
+                                    try {
+                                        val groupId: String = getString(GroupMembership.GROUP_ROW_ID)
+                                        if (groups.containsKey(groupId)) {
+                                            contact.groups += groups[groupId]!!
+                                        }
+                                    } catch (e: Exception) {
+                                        // Skip this group membership if there's an error
+                                    }
                                 }
                             }
                         }
                     }
+                }
+            } catch (e: Exception) {
+                // Log the error but don't crash the app
+                android.util.Log.e("FlutterContacts", "Error reading contacts: ${e.message}", e)
+            } finally {
+                try {
+                    if (!cursor.isClosed) {
+                        cursor.close()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("FlutterContacts", "Error closing cursor: ${e.message}", e)
                 }
             }
 
@@ -808,30 +898,43 @@ class FlutterContacts {
         }
 
         private fun getPhoneLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(Phone.TYPE))
-            return when (type) {
-                Phone.TYPE_ASSISTANT -> "assistant"
-                Phone.TYPE_CALLBACK -> "callback"
-                Phone.TYPE_CAR -> "car"
-                Phone.TYPE_COMPANY_MAIN -> "companyMain"
-                Phone.TYPE_FAX_HOME -> "faxHome"
-                Phone.TYPE_FAX_WORK -> "faxWork"
-                Phone.TYPE_HOME -> "home"
-                Phone.TYPE_ISDN -> "isdn"
-                Phone.TYPE_MAIN -> "main"
-                Phone.TYPE_MMS -> "mms"
-                Phone.TYPE_MOBILE -> "mobile"
-                Phone.TYPE_OTHER -> "other"
-                Phone.TYPE_OTHER_FAX -> "faxOther"
-                Phone.TYPE_PAGER -> "pager"
-                Phone.TYPE_RADIO -> "radio"
-                Phone.TYPE_TELEX -> "telex"
-                Phone.TYPE_TTY_TDD -> "ttyTtd"
-                Phone.TYPE_WORK -> "work"
-                Phone.TYPE_WORK_MOBILE -> "workMobile"
-                Phone.TYPE_WORK_PAGER -> "workPager"
-                Phone.TYPE_CUSTOM -> "custom"
-                else -> "mobile"
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Phone.TYPE)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            Phone.TYPE_ASSISTANT -> "assistant"
+                            Phone.TYPE_CALLBACK -> "callback"
+                            Phone.TYPE_CAR -> "car"
+                            Phone.TYPE_COMPANY_MAIN -> "companyMain"
+                            Phone.TYPE_FAX_HOME -> "faxHome"
+                            Phone.TYPE_FAX_WORK -> "faxWork"
+                            Phone.TYPE_HOME -> "home"
+                            Phone.TYPE_ISDN -> "isdn"
+                            Phone.TYPE_MAIN -> "main"
+                            Phone.TYPE_MMS -> "mms"
+                            Phone.TYPE_MOBILE -> "mobile"
+                            Phone.TYPE_OTHER -> "other"
+                            Phone.TYPE_OTHER_FAX -> "faxOther"
+                            Phone.TYPE_PAGER -> "pager"
+                            Phone.TYPE_RADIO -> "radio"
+                            Phone.TYPE_TELEX -> "telex"
+                            Phone.TYPE_TTY_TDD -> "ttyTtd"
+                            Phone.TYPE_WORK -> "work"
+                            Phone.TYPE_WORK_MOBILE -> "workMobile"
+                            Phone.TYPE_WORK_PAGER -> "workPager"
+                            Phone.TYPE_CUSTOM -> "custom"
+                            else -> "mobile"
+                        }
+                    } else {
+                        "mobile"
+                    }
+                } else {
+                    "mobile"
+                }
+            } catch (e: Exception) {
+                "mobile"
             }
         }
 
@@ -850,17 +953,55 @@ class FlutterContacts {
             if (cursor == null) {
                 return mapOf()
             }
+            
             var groups = mutableMapOf<String, PGroup>()
-            while (cursor.moveToNext()) {
-                val groupId = cursor.getString(cursor.getColumnIndex(Groups._ID)) ?: ""
-                val groupName = cursor.getString(cursor.getColumnIndex(Groups.TITLE)) ?: ""
-                groups[groupId] = PGroup(id = groupId, name = groupName)
+            try {
+                while (cursor.moveToNext()) {
+                    try {
+                        if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                            val columnIndexId = cursor.getColumnIndex(Groups._ID)
+                            val columnIndexTitle = cursor.getColumnIndex(Groups.TITLE)
+                            
+                            if (columnIndexId >= 0 && columnIndexTitle >= 0) {
+                                val groupId = cursor.getString(columnIndexId) ?: ""
+                                val groupName = cursor.getString(columnIndexTitle) ?: ""
+                                groups[groupId] = PGroup(id = groupId, name = groupName)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Skip this group if there's an error
+                        android.util.Log.e("FlutterContacts", "Error reading group: ${e.message}", e)
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("FlutterContacts", "Error reading groups: ${e.message}", e)
+            } finally {
+                try {
+                    if (!cursor.isClosed) {
+                        cursor.close()
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("FlutterContacts", "Error closing groups cursor: ${e.message}", e)
+                }
             }
             return groups
         }
 
         private fun getPhoneCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(Phone.LABEL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Phone.LABEL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class PhoneLabelPair(val label: Int, val customLabel: String)
@@ -892,19 +1033,45 @@ class FlutterContacts {
         }
 
         private fun getEmailLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(Email.TYPE))
-            return when (type) {
-                Email.TYPE_CUSTOM -> "custom"
-                Email.TYPE_HOME -> "home"
-                Email.TYPE_MOBILE -> "mobile"
-                Email.TYPE_OTHER -> "other"
-                Email.TYPE_WORK -> "work"
-                else -> "home"
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Email.TYPE)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            Email.TYPE_CUSTOM -> "custom"
+                            Email.TYPE_HOME -> "home"
+                            Email.TYPE_MOBILE -> "mobile"
+                            Email.TYPE_OTHER -> "other"
+                            Email.TYPE_WORK -> "work"
+                            else -> "home"
+                        }
+                    } else {
+                        "home"
+                    }
+                } else {
+                    "home"
+                }
+            } catch (e: Exception) {
+                "home"
             }
         }
 
         private fun getEmailCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(Email.LABEL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Email.LABEL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class EmailLabelPair(val label: Int, val customLabel: String)
@@ -920,18 +1087,44 @@ class FlutterContacts {
         }
 
         private fun getAddressLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(StructuredPostal.TYPE))
-            return when (type) {
-                StructuredPostal.TYPE_HOME -> "home"
-                StructuredPostal.TYPE_OTHER -> "other"
-                StructuredPostal.TYPE_WORK -> "work"
-                StructuredPostal.TYPE_CUSTOM -> "custom"
-                else -> ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(StructuredPostal.TYPE)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            StructuredPostal.TYPE_HOME -> "home"
+                            StructuredPostal.TYPE_OTHER -> "other"
+                            StructuredPostal.TYPE_WORK -> "work"
+                            StructuredPostal.TYPE_CUSTOM -> "custom"
+                            else -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
             }
         }
 
         private fun getAddressCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(StructuredPostal.LABEL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(StructuredPostal.LABEL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class AddressLabelPair(val label: Int, val customLabel: String)
@@ -946,22 +1139,48 @@ class FlutterContacts {
         }
 
         private fun getWebsiteLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(Website.TYPE))
-            return when (type) {
-                Website.TYPE_BLOG -> "blog"
-                Website.TYPE_FTP -> "ftp"
-                Website.TYPE_HOME -> "home"
-                Website.TYPE_HOMEPAGE -> "homepage"
-                Website.TYPE_OTHER -> "other"
-                Website.TYPE_PROFILE -> "profile"
-                Website.TYPE_WORK -> "work"
-                Website.TYPE_CUSTOM -> "custom"
-                else -> ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Website.TYPE)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            Website.TYPE_BLOG -> "blog"
+                            Website.TYPE_FTP -> "ftp"
+                            Website.TYPE_HOME -> "home"
+                            Website.TYPE_HOMEPAGE -> "homepage"
+                            Website.TYPE_OTHER -> "other"
+                            Website.TYPE_PROFILE -> "profile"
+                            Website.TYPE_WORK -> "work"
+                            Website.TYPE_CUSTOM -> "custom"
+                            else -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
             }
         }
 
         private fun getWebsiteCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(Website.LABEL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Website.LABEL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class WebsiteLabelPair(val label: Int, val customLabel: String)
@@ -980,24 +1199,50 @@ class FlutterContacts {
         }
 
         private fun getSocialMediaLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(Im.PROTOCOL))
-            return when (type) {
-                Im.PROTOCOL_AIM -> "aim"
-                Im.PROTOCOL_GOOGLE_TALK -> "googleTalk"
-                Im.PROTOCOL_ICQ -> "icq"
-                Im.PROTOCOL_JABBER -> "jabber"
-                Im.PROTOCOL_MSN -> "msn"
-                Im.PROTOCOL_NETMEETING -> "netmeeting"
-                Im.PROTOCOL_QQ -> "qqchat"
-                Im.PROTOCOL_SKYPE -> "skype"
-                Im.PROTOCOL_YAHOO -> "yahoo"
-                Im.PROTOCOL_CUSTOM -> "custom"
-                else -> ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Im.PROTOCOL)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            Im.PROTOCOL_AIM -> "aim"
+                            Im.PROTOCOL_GOOGLE_TALK -> "googleTalk"
+                            Im.PROTOCOL_ICQ -> "icq"
+                            Im.PROTOCOL_JABBER -> "jabber"
+                            Im.PROTOCOL_MSN -> "msn"
+                            Im.PROTOCOL_NETMEETING -> "netMeeting"
+                            Im.PROTOCOL_QQ -> "qq"
+                            Im.PROTOCOL_SKYPE -> "skype"
+                            Im.PROTOCOL_YAHOO -> "yahoo"
+                            Im.PROTOCOL_CUSTOM -> "custom"
+                            else -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
             }
         }
 
         private fun getSocialMediaCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(Im.CUSTOM_PROTOCOL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Im.CUSTOM_PROTOCOL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class SocialMediaLabelPair(val label: Int, val customLabel: String)
@@ -1008,8 +1253,8 @@ class FlutterContacts {
                 "icq" -> SocialMediaLabelPair(Im.PROTOCOL_ICQ, "")
                 "jabber" -> SocialMediaLabelPair(Im.PROTOCOL_JABBER, "")
                 "msn" -> SocialMediaLabelPair(Im.PROTOCOL_MSN, "")
-                "netmeeting" -> SocialMediaLabelPair(Im.PROTOCOL_NETMEETING, "")
-                "qqchat" -> SocialMediaLabelPair(Im.PROTOCOL_QQ, "")
+                "netMeeting" -> SocialMediaLabelPair(Im.PROTOCOL_NETMEETING, "")
+                "qq" -> SocialMediaLabelPair(Im.PROTOCOL_QQ, "")
                 "skype" -> SocialMediaLabelPair(Im.PROTOCOL_SKYPE, "")
                 "yahoo" -> SocialMediaLabelPair(Im.PROTOCOL_YAHOO, "")
                 "custom" -> SocialMediaLabelPair(Im.PROTOCOL_CUSTOM, customLabel)
@@ -1018,18 +1263,44 @@ class FlutterContacts {
         }
 
         private fun getEventLabel(cursor: Cursor): String {
-            val type = cursor.getInt(cursor.getColumnIndex(Event.TYPE))
-            return when (type) {
-                Event.TYPE_ANNIVERSARY -> "anniversary"
-                Event.TYPE_BIRTHDAY -> "birthday"
-                Event.TYPE_OTHER -> "other"
-                Event.TYPE_CUSTOM -> "custom"
-                else -> ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Event.TYPE)
+                    if (columnIndex >= 0) {
+                        val type = cursor.getInt(columnIndex)
+                        when (type) {
+                            Event.TYPE_ANNIVERSARY -> "anniversary"
+                            Event.TYPE_BIRTHDAY -> "birthday"
+                            Event.TYPE_OTHER -> "other"
+                            Event.TYPE_CUSTOM -> "custom"
+                            else -> ""
+                        }
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
             }
         }
 
         private fun getEventCustomLabel(cursor: Cursor): String {
-            return cursor.getString(cursor.getColumnIndex(Event.LABEL)) ?: ""
+            return try {
+                if (!cursor.isClosed && !cursor.isAfterLast && !cursor.isBeforeFirst) {
+                    val columnIndex = cursor.getColumnIndex(Event.LABEL)
+                    if (columnIndex >= 0) {
+                        cursor.getString(columnIndex) ?: ""
+                    } else {
+                        ""
+                    }
+                } else {
+                    ""
+                }
+            } catch (e: Exception) {
+                ""
+            }
         }
 
         private data class EventLabelPair(val label: Int, val customLabel: String)
